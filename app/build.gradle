@@ -1,0 +1,22 @@
+plugins { id "com.android.application" }
+
+android {
+    namespace "it.paolo.radarocchiali"
+    compileSdk 34
+    defaultConfig {
+        applicationId "it.paolo.radarocchiali"
+        minSdk 26
+        targetSdk 29      // permessi Bluetooth "classici": basta il permesso Posizione
+        versionCode 1
+        versionName "1.0"
+    }
+    buildTypes {
+        // APK installabile subito: firmato con la chiave di debug
+        debug { minifyEnabled false }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+    lint { abortOnError false; checkReleaseBuilds false }
+}
