@@ -27,5 +27,13 @@ public final class Dispositivo {
         pacchetti++;
     }
 
-    public boolean occhiale() { return motivo != null; }
+    /** firma certa di smartglass: fa suonare il radar */
+    public boolean occhiale() { return Rilevatore.certo(motivo); }
+
+    /** firma solo probabile (condivisa con cuffie, visori...): suona solo se agganciato */
+    public boolean probabile() { return motivo != null && !occhiale(); }
+
+    public void segna(String m) {
+        if (m != null && !occhiale()) motivo = m;   // un "probabile" può diventare "certo", mai il contrario
+    }
 }

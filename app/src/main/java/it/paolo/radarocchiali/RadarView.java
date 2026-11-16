@@ -91,7 +91,10 @@ public class RadarView extends View {
             double a = Math.toRadians(d.angolo);
             float x = cx + (float) (r * Math.cos(a)), y = cy + (float) (r * Math.sin(a));
             boolean b = d == bersaglio;
-            if (!d.occhiale()) {
+            if (d.probabile()) {
+                p.setColor(Color.argb(b ? 255 : 200, 255, 170, 60));
+                c.drawCircle(x, y, (b ? 9 : 5.5f) * dp, p);
+            } else if (!d.occhiale()) {
                 p.setColor(Color.argb(b ? 255 : 110, 160, 160, 160));
                 c.drawCircle(x, y, (b ? 7 : 3.5f) * dp, p);
             } else {

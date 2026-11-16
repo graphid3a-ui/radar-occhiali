@@ -118,7 +118,8 @@ public class MainActivity extends Activity {
 
         avviso = testo(12, Color.rgb(140, 150, 145), false);
         avviso.setText("Tocca un dispositivo per agganciarlo. La distanza è stimata, la direzione no: "
-                + "girati lentamente, quando il segnale cala gli occhiali sono alle tue spalle.");
+                + "girati lentamente, quando il segnale cala gli occhiali sono alle tue spalle. "
+                + "Arancione = da verificare: marchio che fa anche cuffie o visori, suona solo se lo agganci.");
         col.addView(avviso);
 
         ListView lista = new ListView(this);
@@ -238,6 +239,8 @@ public class MainActivity extends Activity {
         }
     };
 
+    private static final ParcelUuid FEA8 = ParcelUuid.fromString("0000fea8-0000-1000-8000-00805f9b34fb");
+
     private void ricevi(ScanResult r) {
         if (r == null || r.getDevice() == null) return;
         String mac = r.getDevice().getAddress();
@@ -246,6 +249,7 @@ public class MainActivity extends Activity {
         int[] ids = null;
         String[] uuids = null;
         String nome = null;
+        byte[] fea8 = null;
         if (rec != null) {
             SparseArray<byte[]> md = rec.getManufacturerSpecificData();
             if (md != null) {
@@ -257,13 +261,14 @@ public class MainActivity extends Activity {
             if (rec.getServiceData() != null) for (ParcelUuid p : rec.getServiceData().keySet()) u.add(p.toString());
             uuids = u.toArray(new String[0]);
             nome = rec.getDeviceName();
+            fea8 = rec.getServiceData(FEA8);
         }
-        String motivo = Rilevatore.riconosci(ids, uuids, nome);
+        String motivo = Rilevatore.riconosci(ids, uuids, nome, fea8);
         synchronized (mappa) {
             Dispositivo d = mappa.get(mac);
             if (d == null) { d = new Dispositivo(mac, r.getRssi(), ora); mappa.put(mac, d); }
             else d.aggiorna(r.getRssi(), ora);
-            if (motivo != null) d.motivo = motivo;   // una volta riconosciuto resta riconosciuto
+            d.segna(motivo);
             if (nome != null) d.nome = nome;
         }
     }
@@ -282,7 +287,7 @@ public class MainActivity extends Activity {
         long ora = SystemClock.elapsedRealtime();
         List<Dispositivo> visibili = new ArrayList<>();
         Dispositivo bers = null, agg = null;
-        int occhiali = 0;
+        int occhiali = 0, probabili = 0;
         synchronized (mappa) {
             List<String> via = new ArrayList<>();
             for (Dispositivo d : mappa.values()) {
@@ -291,7 +296,8 @@ public class MainActivity extends Activity {
                 if (d.mac.equals(agganciato) && eta < AGGANCIO_MS) agg = d;
                 if (eta > VISIBILE_MS) continue;
                 if (d.occhiale()) occhiali++;
-                if (d.occhiale() || tutti) visibili.add(d);
+                if (d.probabile()) probabili++;
+                if (d.occhiale() || d.probabile() || tutti) visibili.add(d);
             }
             for (String m : via) mappa.remove(m);
         }
@@ -299,6 +305,7 @@ public class MainActivity extends Activity {
         Collections.sort(visibili, new Comparator<Dispositivo>() {
             public int compare(Dispositivo a, Dispositivo b) {
                 if (a.occhiale() != b.occhiale()) return a.occhiale() ? -1 : 1;
+                if (a.probabile() != b.probabile()) return a.probabile() ? -1 : 1;
                 return Double.compare(b.rssi, a.rssi);
             }
         });
@@ -308,6 +315,7 @@ public class MainActivity extends Activity {
         titolo.setText(occhiali == 0 ? "RADAR OCCHIALI · nessun occhiale in vista"
                 : "RADAR OCCHIALI · " + occhiali + (occhiali == 1 ? " occhiale" : " occhiali") + " in vista"
                 + (agganciato != null ? " · AGGANCIATO" : ""));
+        if (probabili > 0) titolo.append(" · " + probabili + " da verificare");
         radar.imposta(visibili, bers, agganciato != null);
 
         if (bers == null) {
@@ -318,7 +326,7 @@ public class MainActivity extends Activity {
             double vic = Rilevatore.vicinanza(bers.rssi);
             grande.setText(String.format(Locale.ITALY, "%d%%  ·  ~%s", Math.round(vic * 100), metri(bers.rssi)));
             grande.setTextColor(RadarView.colore(vic));
-            piccolo.setText(String.format(Locale.ITALY, "%s · %d dBm · %s", bers.motivo != null ? bers.motivo : "BLE",
+            piccolo.setText(String.format(Locale.ITALY, "%s · %d dBm · %s", bers.motivo != null ? bers.motivo.replace("? ", "probabile: ") : "BLE",
                     bers.rssiGrezzo, coda(bers.mac)));
             if (ora >= prossimoBip && (bers.occhiale() || agg != null)) {
                 int periodo = Rilevatore.periodoBip(bers.rssi);
@@ -368,9 +376,10 @@ public class MainActivity extends Activity {
             int barre = (int) Math.round(Rilevatore.vicinanza(d.rssi) * 12);
             StringBuilder sb = new StringBuilder();
             for (int k = 0; k < 12; k++) sb.append(k < barre ? '█' : '·');
-            t.setText((agg ? "▶ " : "") + (d.occhiale() ? "👓 " + d.motivo : (d.nome != null ? d.nome : "dispositivo BLE"))
+            t.setText((agg ? "▶ " : "") + (d.occhiale() ? "👓 " + d.motivo : d.probabile() ? "❓ probabile: " + d.motivo.substring(2) : (d.nome != null ? d.nome : "dispositivo BLE"))
                     + "\n" + sb + "  " + Math.round(d.rssi) + " dBm  ~" + metri(d.rssi) + "  " + coda(d.mac));
-            t.setTextColor(d.occhiale() ? RadarView.colore(Rilevatore.vicinanza(d.rssi)) : Color.rgb(150, 155, 150));
+            t.setTextColor(d.occhiale() ? RadarView.colore(Rilevatore.vicinanza(d.rssi))
+                    : d.probabile() ? Color.rgb(255, 170, 60) : Color.rgb(150, 155, 150));
             t.setBackgroundColor(agg ? Color.rgb(30, 50, 40) : Color.TRANSPARENT);
             return t;
         }
