@@ -11,7 +11,18 @@ jobs:
         with: { distribution: temurin, java-version: "17" }
       - uses: gradle/actions/setup-gradle@v4
         with: { gradle-version: "8.13" }
+      # chiave di firma fissa, se i segreti sono configurati (Settings > Secrets and variables > Actions)
+      - name: Chiave di firma
+        env: { KEYSTORE_B64: "${{ secrets.KEYSTORE_B64 }}" }
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/radar.jks"
+            echo "KS_PATH=$RUNNER_TEMP/radar.jks" >> "$GITHUB_ENV"
+          else
+            echo "Segreti assenti: firma con chiave di debug"
+          fi
       - run: gradle :app:assembleDebug
+        env: { KS_PASS: "${{ secrets.KEYSTORE_PASS }}" }
       - run: cp app/build/outputs/apk/debug/app-debug.apk radar-occhiali.apk
       - uses: actions/upload-artifact@v4
         with:

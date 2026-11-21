@@ -10,9 +10,24 @@ android {
         versionCode 2
         versionName "1.2"
     }
+    // Chiave di firma fissa (segreti GitHub KEYSTORE_B64 / KEYSTORE_PASS): permette di
+    // aggiornare l'app senza disinstallarla. Senza segreti si usa la chiave di debug.
+    def ks = System.getenv("KS_PATH")
+    signingConfigs {
+        stabile {
+            if (ks) {
+                storeFile file(ks)
+                storePassword System.getenv("KS_PASS")
+                keyAlias "radar"
+                keyPassword System.getenv("KS_PASS")
+            }
+        }
+    }
     buildTypes {
-        // APK installabile subito: firmato con la chiave di debug
-        debug { minifyEnabled false }
+        debug {
+            minifyEnabled false
+            if (ks) signingConfig signingConfigs.stabile
+        }
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8
