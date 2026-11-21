@@ -408,7 +408,9 @@ static void handleKeys() {
 
     if (showHelp) { showHelp = false; return; }
 
-    if (st.del || st.backspace || st.esc) {
+    bool esc = false;
+    for (char c : st.word) if (c == 0x60) esc = true;  // tasto esc (`)
+    if (st.del || esc) {
         lockedSlot = -1;
         return;
     }
@@ -439,7 +441,8 @@ static void handleKeys() {
 void setup() {
     auto cfg = M5.config();
     M5Cardputer.begin(cfg, true);
-    M5Cardputer.Display.setRotation(1);
+    if (M5Cardputer.Display.width() < M5Cardputer.Display.height())
+        M5Cardputer.Display.setRotation(M5Cardputer.Display.getRotation() ^ 1);  // sempre orizzontale
     M5Cardputer.Speaker.setVolume(160);
 
     WiFi.mode(WIFI_OFF);  // nessuna trasmissione verso l'esterno
