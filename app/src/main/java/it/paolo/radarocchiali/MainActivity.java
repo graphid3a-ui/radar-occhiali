@@ -13,6 +13,10 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
 import android.graphics.Typeface;
 import android.location.LocationManager;
 import android.media.AudioManager;
@@ -61,7 +65,27 @@ public class MainActivity extends Activity {
 
     private RadarView radar;
     private TextView titolo, grande, piccolo, avviso;
-    private Button bSuono, bVibra, bTutti, bSgancia;
+    private Button bSuono, bVibra, bTutti, bSgancia, bDirezione;
+
+    // modalità direzione (giro di scansione con la bussola)
+    private final Direzione direzione = new Direzione();
+    private boolean modoDirezione;
+    private String macDirezione;
+    private float azimut = Float.NaN;
+    private SensorManager sensori;
+    private final float[] matrice = new float[9];
+    private final SensorEventListener bussola = new SensorEventListener() {
+        public void onSensorChanged(SensorEvent e) {
+            SensorManager.getRotationMatrixFromVector(matrice, e.values);
+            // asse Y del telefono (in piano) o retro dello schermo (telefono in piedi):
+            // si usa quello più orizzontale. Mondo: X = est, Y = nord, Z = alto.
+            float yx = matrice[1], yy = matrice[4], yz = matrice[7];
+            float zx = -matrice[2], zy = -matrice[5], zz = -matrice[8];
+            double a = Math.abs(yz) < Math.abs(zz) ? Math.atan2(yx, yy) : Math.atan2(zx, zy);
+            azimut = (float) ((Math.toDegrees(a) + 360.0) % 360.0);
+        }
+        public void onAccuracyChanged(Sensor s, int acc) { }
+    };
     private Adattatore adattatore;
     private ToneGenerator tono;
     private Vibrator vibratore;
@@ -74,6 +98,7 @@ public class MainActivity extends Activity {
         costruisciInterfaccia();
         try { tono = new ToneGenerator(AudioManager.STREAM_MUSIC, 90); } catch (RuntimeException e) { tono = null; }
         vibratore = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+        sensori = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
     }
 
     // ------------------------------------------------------------------ interfaccia
@@ -111,14 +136,17 @@ public class MainActivity extends Activity {
         tasti.addView(bTutti, pesato());
         tasti.addView(bSgancia, pesato());
         col.addView(tasti);
+        bDirezione = tasto("Trova direzione");
+        col.addView(bDirezione, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        bDirezione.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { commutaDirezione(); } });
         bSuono.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { suono = !suono; aggiornaTasti(); } });
         bVibra.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { vibra = !vibra; aggiornaTasti(); } });
         bTutti.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { tutti = !tutti; aggiornaTasti(); } });
-        bSgancia.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { agganciato = null; aggiornaTasti(); } });
+        bSgancia.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { agganciato = null; fermaDirezione(); aggiornaTasti(); } });
 
         avviso = testo(12, Color.rgb(140, 150, 145), false);
-        avviso.setText("Tocca un dispositivo per agganciarlo. La distanza è stimata, la direzione no: "
-                + "girati lentamente, quando il segnale cala gli occhiali sono alle tue spalle. "
+        avviso.setText("Tocca un dispositivo per agganciarlo. Per la direzione premi \"Trova direzione\", "
+                + "tieni il telefono al petto e gira lentamente su te stesso: la freccia indica dove il segnale è più forte. "
                 + "Arancione = da verificare: marchio che fa anche cuffie o visori, suona solo se lo agganci.");
         col.addView(avviso);
 
@@ -132,6 +160,20 @@ public class MainActivity extends Activity {
         });
         col.addView(lista, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
+        final int padBase = pad;
+        col.setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener() {
+            public android.view.WindowInsets onApplyWindowInsets(View v, android.view.WindowInsets in) {
+                int top, bottom;
+                if (Build.VERSION.SDK_INT >= 30) {
+                    android.graphics.Insets s = in.getInsets(android.view.WindowInsets.Type.systemBars());
+                    top = s.top; bottom = s.bottom;
+                } else {
+                    top = in.getSystemWindowInsetTop(); bottom = in.getSystemWindowInsetBottom();
+                }
+                v.setPadding(padBase, padBase + top, padBase, padBase + bottom);
+                return in;
+            }
+        });
         setContentView(col);
         aggiornaTasti();
     }
@@ -161,6 +203,31 @@ public class MainActivity extends Activity {
         bVibra.setText(vibra ? "Vibra ON" : "Vibra OFF");
         bTutti.setText(tutti ? "Tutti BLE" : "Solo occhiali");
         bSgancia.setEnabled(agganciato != null);
+        bDirezione.setText(modoDirezione ? "Ferma direzione" : "Trova direzione");
+    }
+
+    // ------------------------------------------------------------------ direzione
+    private String bersaglioCorrente;   // mac del dispositivo mostrato in grande
+
+    private void commutaDirezione() {
+        if (modoDirezione) { fermaDirezione(); aggiornaTasti(); return; }
+        String mac = agganciato != null ? agganciato : bersaglioCorrente;
+        if (mac == null) { piccolo.setText("Prima tocca un dispositivo nella lista"); return; }
+        if (sensori == null || sensori.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR) == null) {
+            piccolo.setText("Questo telefono non ha la bussola");
+            return;
+        }
+        agganciato = mac;               // la direzione si cerca sempre su un dispositivo agganciato
+        macDirezione = mac;
+        synchronized (direzione) { direzione.azzera(); }
+        modoDirezione = true;
+        aggiornaTasti();
+    }
+
+    private void fermaDirezione() {
+        modoDirezione = false;
+        macDirezione = null;
+        synchronized (direzione) { direzione.azzera(); }
     }
 
     // ------------------------------------------------------------------ ciclo di vita
@@ -168,12 +235,17 @@ public class MainActivity extends Activity {
         super.onResume();
         avvia();
         h.post(ciclo);
+        if (sensori != null) {
+            Sensor rv = sensori.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR);
+            if (rv != null) sensori.registerListener(bussola, rv, SensorManager.SENSOR_DELAY_UI);
+        }
     }
 
     @Override protected void onPause() {
         super.onPause();
         h.removeCallbacks(ciclo);
         ferma();
+        if (sensori != null) sensori.unregisterListener(bussola);
     }
 
     @Override protected void onDestroy() {
@@ -182,10 +254,13 @@ public class MainActivity extends Activity {
     }
 
     private void avvia() {
-        if (Build.VERSION.SDK_INT >= 23
-                && checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-            titolo.setText("Serve il permesso Posizione (Android lo chiede per il Bluetooth)");
-            requestPermissions(new String[] { Manifest.permission.ACCESS_FINE_LOCATION }, 1);
+        // Android 12+: permesso "Dispositivi nelle vicinanze" (neverForLocation, niente GPS)
+        // Android 11 e precedenti: permesso Posizione, richiesto dal sistema per il Bluetooth
+        String perm = Build.VERSION.SDK_INT >= 31 ? Manifest.permission.BLUETOOTH_SCAN : Manifest.permission.ACCESS_FINE_LOCATION;
+        if (Build.VERSION.SDK_INT >= 23 && checkSelfPermission(perm) != PackageManager.PERMISSION_GRANTED) {
+            titolo.setText(Build.VERSION.SDK_INT >= 31 ? "Serve il permesso \"Dispositivi nelle vicinanze\""
+                    : "Serve il permesso Posizione (Android lo chiede per il Bluetooth)");
+            requestPermissions(new String[] { perm }, 1);
             return;
         }
         BluetoothManager bm = (BluetoothManager) getSystemService(Context.BLUETOOTH_SERVICE);
@@ -193,11 +268,12 @@ public class MainActivity extends Activity {
         if (ad == null) { titolo.setText("Bluetooth non disponibile"); return; }
         if (!ad.isEnabled()) {
             titolo.setText("Accendi il Bluetooth");
-            startActivity(new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE));
+            // da Android 12 la richiesta diretta vuole un permesso in più: apriamo le impostazioni
+            startActivity(new Intent(Build.VERSION.SDK_INT >= 31 ? Settings.ACTION_BLUETOOTH_SETTINGS : BluetoothAdapter.ACTION_REQUEST_ENABLE));
             return;
         }
         LocationManager lm = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
-        if (Build.VERSION.SDK_INT >= 28 && lm != null && !lm.isLocationEnabled()) {
+        if (Build.VERSION.SDK_INT >= 28 && Build.VERSION.SDK_INT < 31 && lm != null && !lm.isLocationEnabled()) {
             titolo.setText("Accendi la Posizione (GPS), senza non arrivano dati Bluetooth");
             startActivity(new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS));
             return;
@@ -226,7 +302,8 @@ public class MainActivity extends Activity {
 
     @Override public void onRequestPermissionsResult(int req, String[] perm, int[] res) {
         if (res.length > 0 && res[0] == PackageManager.PERMISSION_GRANTED) avvia();
-        else titolo.setText("Senza permesso Posizione Android non mostra i dispositivi Bluetooth");
+        else titolo.setText(Build.VERSION.SDK_INT >= 31 ? "Senza \"Dispositivi nelle vicinanze\" l'app non vede il Bluetooth"
+                : "Senza permesso Posizione Android non mostra i dispositivi Bluetooth");
     }
 
     // ------------------------------------------------------------------ scansione
@@ -250,7 +327,9 @@ public class MainActivity extends Activity {
         String[] uuids = null;
         String nome = null;
         byte[] fea8 = null;
+        byte[] grezzo = null;
         if (rec != null) {
+            grezzo = rec.getBytes();
             SparseArray<byte[]> md = rec.getManufacturerSpecificData();
             if (md != null) {
                 ids = new int[md.size()];
@@ -263,7 +342,9 @@ public class MainActivity extends Activity {
             nome = rec.getDeviceName();
             fea8 = rec.getServiceData(FEA8);
         }
-        String motivo = Rilevatore.riconosci(ids, uuids, nome, fea8);
+        String motivo = Rilevatore.riconosci(ids, uuids, nome, fea8, grezzo);
+        if (modoDirezione && mac.equals(macDirezione) && !Float.isNaN(azimut))
+            synchronized (direzione) { direzione.aggiungi(azimut, r.getRssi()); }
         synchronized (mappa) {
             Dispositivo d = mappa.get(mac);
             if (d == null) { d = new Dispositivo(mac, r.getRssi(), ora); mappa.put(mac, d); }
@@ -301,7 +382,7 @@ public class MainActivity extends Activity {
             }
             for (String m : via) mappa.remove(m);
         }
-        if (agganciato != null && agg == null) agganciato = null;  // sparito o MAC cambiato
+        if (agganciato != null && agg == null) { agganciato = null; fermaDirezione(); aggiornaTasti(); }  // sparito o MAC cambiato
         Collections.sort(visibili, new Comparator<Dispositivo>() {
             public int compare(Dispositivo a, Dispositivo b) {
                 if (a.occhiale() != b.occhiale()) return a.occhiale() ? -1 : 1;
@@ -316,6 +397,16 @@ public class MainActivity extends Activity {
                 : "RADAR OCCHIALI · " + occhiali + (occhiali == 1 ? " occhiale" : " occhiali") + " in vista"
                 + (agganciato != null ? " · AGGANCIATO" : ""));
         if (probabili > 0) titolo.append(" · " + probabili + " da verificare");
+        bersaglioCorrente = bers != null ? bers.mac : null;
+        boolean pronta;
+        float copertura;
+        double contrasto;
+        synchronized (direzione) {
+            pronta = direzione.pronta();
+            copertura = direzione.copertura();
+            contrasto = direzione.contrasto();
+            radar.direzione(modoDirezione, modoDirezione ? direzione : null, azimut, pronta);
+        }
         radar.imposta(visibili, bers, agganciato != null);
 
         if (bers == null) {
@@ -326,7 +417,13 @@ public class MainActivity extends Activity {
             double vic = Rilevatore.vicinanza(bers.rssi);
             grande.setText(String.format(Locale.ITALY, "%d%%  ·  ~%s", Math.round(vic * 100), metri(bers.rssi)));
             grande.setTextColor(RadarView.colore(vic));
-            piccolo.setText(String.format(Locale.ITALY, "%s · %d dBm · %s", bers.motivo != null ? bers.motivo.replace("? ", "probabile: ") : "BLE",
+            if (modoDirezione && !pronta)
+                piccolo.setText(String.format(Locale.ITALY, "Telefono al petto, gira lentamente: %d%% del giro · contrasto %.0f dB",
+                        Math.round(copertura * 100), contrasto));
+            else if (modoDirezione)
+                piccolo.setText(String.format(Locale.ITALY, "Segui la freccia rossa · contrasto %.0f dB · %d dBm", contrasto, bers.rssiGrezzo));
+            else
+                piccolo.setText(String.format(Locale.ITALY, "%s · %d dBm · %s", bers.motivo != null ? bers.motivo.replace("? ", "probabile: ") : "BLE",
                     bers.rssiGrezzo, coda(bers.mac)));
             if (ora >= prossimoBip && (bers.occhiale() || agg != null)) {
                 int periodo = Rilevatore.periodoBip(bers.rssi);

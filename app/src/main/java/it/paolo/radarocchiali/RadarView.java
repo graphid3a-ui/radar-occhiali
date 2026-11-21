@@ -19,6 +19,13 @@ public class RadarView extends View {
     private boolean agganciato;
     private final float dp;
 
+    // modalità direzione
+    private boolean dirAttiva;
+    private final boolean[] coperti = new boolean[Direzione.SETTORI];
+    private float azimutTel = Float.NaN;   // dove punta il telefono (gradi, 0 = nord)
+    private float azimutBers = Float.NaN;  // stima verso il bersaglio (gradi, 0 = nord)
+    private boolean dirPronta;
+
     public RadarView(Context c) {
         super(c);
         dp = c.getResources().getDisplayMetrics().density;
@@ -30,6 +37,14 @@ public class RadarView extends View {
         bersaglio = bers;
         agganciato = aggancio;
         invalidate();
+    }
+
+    public void direzione(boolean attiva, Direzione d, float telefono, boolean pronta) {
+        dirAttiva = attiva;
+        azimutTel = telefono;
+        dirPronta = pronta;
+        azimutBers = d == null ? Float.NaN : d.migliore();
+        for (int i = 0; i < Direzione.SETTORI; i++) coperti[i] = d != null && d.coperto(i);
     }
 
     @Override protected void onMeasure(int w, int h) {
@@ -113,6 +128,38 @@ public class RadarView extends View {
                 }
                 p.setStyle(Paint.Style.FILL);
             }
+        }
+
+        // modalità direzione: corona dei settori già scansionati + freccia
+        if (dirAttiva && !Float.isNaN(azimutTel)) {
+            float largh = 360f / Direzione.SETTORI;
+            RectF corona = new RectF(cx - R - 7 * dp, cy - R - 7 * dp, cx + R + 7 * dp, cy + R + 7 * dp);
+            p.setStyle(Paint.Style.STROKE);
+            p.setStrokeWidth(6 * dp);
+            for (int i = 0; i < Direzione.SETTORI; i++) {
+                float rel = i * largh - azimutTel;           // rispetto a dove punta il telefono
+                p.setColor(coperti[i] ? Color.rgb(60, 200, 130) : Color.rgb(45, 55, 50));
+                c.drawArc(corona, rel - 90f + 1f, largh - 2f, false, p);
+            }
+            if (!Float.isNaN(azimutBers)) {
+                double a = Math.toRadians(azimutBers - azimutTel - 90.0);
+                float L = R * 0.95f;
+                float tx = cx + (float) (L * Math.cos(a)), ty = cy + (float) (L * Math.sin(a));
+                p.setStrokeWidth((dirPronta ? 7 : 3) * dp);
+                p.setColor(dirPronta ? Color.rgb(255, 80, 60) : Color.argb(150, 255, 200, 80));
+                c.drawLine(cx, cy, tx, ty, p);
+                // punta
+                double a1 = a + Math.toRadians(150), a2 = a - Math.toRadians(150);
+                float pl = 22 * dp;
+                p.setStyle(Paint.Style.FILL);
+                android.graphics.Path f = new android.graphics.Path();
+                f.moveTo(tx, ty);
+                f.lineTo(tx + (float) (pl * Math.cos(a1)), ty + (float) (pl * Math.sin(a1)));
+                f.lineTo(tx + (float) (pl * Math.cos(a2)), ty + (float) (pl * Math.sin(a2)));
+                f.close();
+                c.drawPath(f, p);
+            }
+            p.setStyle(Paint.Style.FILL);
         }
 
         // centro = tu

@@ -48,8 +48,21 @@ public final class Rilevatore {
             "smart glasses", "ai glasses", "occhiali" };
     static final String[] NOMI_PROBABILI = { "glasses", "glass" };
 
-    /** @return motivo (con PREFISSO_PROBABILE se solo probabile), oppure null se non sembra uno smartglass. */
+    // ---- Stringhe nel pacchetto grezzo (come il progetto Spectacle per M5Stack) ----
+    // I Ray-Ban Meta inseriscono questa sigla nell'advertising: distingue gli occhiali dai visori Quest.
+    static final String[] PAYLOAD_CERTI = { "META_RB_GLASS", "RB_GLASS" };
+    static final String[] PAYLOAD_CERTI_NOME = { "Ray-Ban Meta (firma confermata)", "Ray-Ban Meta (firma confermata)" };
+
+    /** Compatibilità con la versione precedente (senza pacchetto grezzo). */
     public static String riconosci(int[] companyIds, String[] uuids, String nome, byte[] datiFea8) {
+        return riconosci(companyIds, uuids, nome, datiFea8, null);
+    }
+
+    /** @return motivo (con PREFISSO_PROBABILE se solo probabile), oppure null se non sembra uno smartglass. */
+    public static String riconosci(int[] companyIds, String[] uuids, String nome, byte[] datiFea8, byte[] grezzo) {
+        if (grezzo != null)
+            for (int i = 0; i < PAYLOAD_CERTI.length; i++)
+                if (contiene(grezzo, PAYLOAD_CERTI[i])) return PAYLOAD_CERTI_NOME[i];
         String probabile = null;
         if (companyIds != null)
             for (int cid : companyIds) {
@@ -75,6 +88,17 @@ public final class Rilevatore {
             for (String p : NOMI_PROBABILI) if (l.contains(p) && probabile == null) probabile = "nome \"" + nome + "\"";
         }
         return probabile == null ? null : PREFISSO_PROBABILE + probabile;
+    }
+
+    /** true se la sequenza ASCII s compare nei byte b. */
+    static boolean contiene(byte[] b, String s) {
+        int n = s.length();
+        outer:
+        for (int i = 0; i + n <= b.length; i++) {
+            for (int k = 0; k < n; k++) if (b[i + k] != (byte) s.charAt(k)) continue outer;
+            return true;
+        }
+        return false;
     }
 
     public static boolean certo(String motivo) {

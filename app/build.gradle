@@ -2,13 +2,13 @@ plugins { id "com.android.application" }
 
 android {
     namespace "it.paolo.radarocchiali"
-    compileSdk 34
+    compileSdk 36
     defaultConfig {
         applicationId "it.paolo.radarocchiali"
         minSdk 26
-        targetSdk 29      // permessi Bluetooth "classici": basta il permesso Posizione
-        versionCode 1
-        versionName "1.0"
+        targetSdk 36      // requisito Google Play da agosto 2026
+        versionCode 2
+        versionName "1.2"
     }
     buildTypes {
         // APK installabile subito: firmato con la chiave di debug
